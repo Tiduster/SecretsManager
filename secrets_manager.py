@@ -54,30 +54,31 @@ def list_secrets():
 def delete_secret(args):
     client = boto3.client('secretsmanager')
     if args.force:
+        # Remove secret immediately
         client.delete_secret(SecretId=args.secret_name, ForceDeleteWithoutRecovery=True)
     else:
+        # Remove secret in x Days
         client.delete_secret(SecretId=args.secret_name, RecoveryWindowInDays=args.delay)
     logging.info("Secret '%s' deleted", args.secret_name)
 
 def find_secret(args):
     client = boto3.client('secretsmanager')
-    if args.secret_name:
+    if args.secret_name:  # Find secret by name
         secret = client.describe_secret(SecretId=args.secret_name)
         if 'Tags' in secret:
             logging.info("%s %s", secret['Name'], secret['Tags'])
         else:
             logging.info(secret['Name'])
-    else:
-        secrets = client.list_secrets()
+    else:  # Find secret using tags
+        secrets = client.list_secrets()  # Return all secrets
         for secret in secrets['SecretList']:
-            if 'Tags' in secret:
+            if 'Tags' in secret:  # If the secret has tags
                 for tag in secret['Tags']:
                     for k, v in args.tags.items():
-                        if tag['Key'] == k and tag['Value'] == v:
+                        if tag['Key'] == k and tag['Value'] == v:  # If tags match user search
                             logging.info("%s %s", secret['Name'], secret['Tags'])
 
 def get_set_secret(args):
-    #from pprint import pprint; pprint(args); sys.exit(1)
     secret_name = args.secret_name
     template_files = args.template_files
 
@@ -91,6 +92,7 @@ def get_set_secret(args):
             if(args.allow_creation):
                 logging.debug("Creation of secret '%s'", secret_name)
 
+                # Call AWS function 'get_random_password'
                 generated_secret = client.get_random_password(
                     PasswordLength=args.secret_length,
                     ExcludePunctuation=args.exclude_punctuation,
@@ -98,7 +100,7 @@ def get_set_secret(args):
                 )
                 logging.debug("%s", generated_secret)
 
-                if isinstance(args.tags, dict):
+                if isinstance(args.tags, dict):  # If user specified some tags
                     aws_tags = []
                     for k, v in args.tags.items():
                         aws_tags.append({'Key': k, 'Value': v})
@@ -106,6 +108,7 @@ def get_set_secret(args):
                 else:
                     response = client.create_secret(Name=secret_name, SecretString=generated_secret['RandomPassword'])
             else:
+                # No secret and --create wasn't specified
                 raise SecretNotFound("Secrets Manager can't find the specified secret '%s'", secret_name)
 
         elif e.response['Error']['Code'] == 'InvalidRequestException' and 'it was deleted' in e.response['Error']['Message']:
@@ -117,11 +120,12 @@ def get_set_secret(args):
 
     logging.debug("%s", response)
     if 'SecretString' in response:
-        plain_text_secret = response['SecretString']
+        plain_text_secret = response['SecretString']  # GET
     else:
-        plain_text_secret = generated_secret['RandomPassword']
+        plain_text_secret = generated_secret['RandomPassword']  # SET
     logging.info("%s", plain_text_secret)
 
+    # If user ask for template generation
     if template_files:
         file_loader = FileSystemLoader(os.path.dirname(template_files[0]))
         env = Environment(loader=file_loader)
@@ -170,11 +174,11 @@ def main():
         if args.template_files:
             if len(args.template_files) != 2:
                 parser.error("--template require template_path and output_file")
-            args.no_stdout = True
+            args.no_stdout = True  # Disable stdout for template generation
         if args.no_stdout and args.verbosity != 'DEBUG':
             args.verbosity = 'ERROR'
     if args.subcommand == 'set':
-        args.allow_creation = True
+        args.allow_creation = True  # With 'set' allow secret creation by default
 
     if args.subcommand == 'delete':
         if args.delay < 7 or args.delay > 30:
@@ -184,6 +188,7 @@ def main():
         if args.secret_name is None and args.tags is None:
             parser.error("You need to specify a secret_name or some tags")
 
+    # Configure verbosity and redirect error logging to stderr
     logging.config.dictConfig({
         "version": 1,
         "handlers": {
